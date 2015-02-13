@@ -1,0 +1,204 @@
+---
+title: "Storm Data"
+author: "Marios"
+date: "Friday, February 13, 2015"
+output: 
+  html_document:
+    keep_md: true
+---
+
+
+First, we set echo equal a **TRUE** and results equal a **'hold'** as global options for this document.  
+```{r set_options}
+library(knitr)
+opts_chunk$set(echo = TRUE, results = 'hold')
+```
+
+
+```{r  message=FALSE, warning=FALSE}
+# load r libraries
+sessionInfo()
+packages <- c("dplyr", "tidyr",  "ggplot2", "lubridate")
+if (length(setdiff(packages, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packages, rownames(installed.packages())))  
+}
+sapply(packages, require, character.only=TRUE, quietly=TRUE)
+
+downloadFile <-function(furl, fsave){
+        download.file(fileUrl,  fsave, method="curl")
+        cat(paste0("file download complete - remember to unzip file: ",fsave))        
+}   
+
+
+DEBUG <- TRUE
+fileUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+DATAFILE <- file.path(getwd(), "stormData.csv")
+DATAZIP  <- file.path(getwd(), "stormData.bz2")
+
+# check and download data file
+if (!file.exists(DATAFILE)) {
+  cat(paste0(DATAFILE," doesn't exist"))
+  # check data exists
+        if (!file.exists(DATAZIP)) {
+                cat(paste0(DATAZIP," doesn't exist trying to download ... "))
+                downloadFile(fileUrl, DATAZIP)
+                }
+  unzip ("stormData.bz2")
+  stopifnot(file.exists(DATAFILE))          
+}   
+```
+
+
+## Loading and preprocessing the data
+
+
+## Loading and preprocessing the data
+
+Show any code that is needed to
+
+* Load the data (i.e. read.csv())
+
+* Process/transform the data (if necessary) into a format suitable for your analysis
+
+```{r read_data}
+activity <- tbl_df(read.csv(DATAFILE)) %>%
+            mutate( date = ymd(date), mydate = date +  minutes(interval)) %>%
+            select(steps, date, interval, mydate )
+```
+
+Now, let us check the data using `str()` method:
+
+```{r check_data}
+str(activity)
+```
+
+
+## What is mean total number of steps taken per day?
+
+For this part of the assignment, you can ignore the missing values in the dataset.
+
+    1. Calculate the total number of steps taken per day
+   
+```{r act1}
+act1 <- activity  %>% na.omit() %>%
+        group_by(date) %>%   
+        summarise(stepsperDay = sum(steps, na.rm = TRUE)) %>% print
+summary(act1)                   
+```
+
+    2. Make a histogram of the total number of steps taken each day
+
+```{r act2}
+hist(act1$stepsperDay, breaks=8, col="red", main ="Total steps per day", xlab="Steps per Day")   
+```
+
+    3.  Calculate and report the mean and median of the total number of steps taken per day
+```{r act3}
+act3 <- act1  %>% summarise( mean = mean(stepsperDay, na.rm = TRUE),
+                             median = median(stepsperDay, na.rm = TRUE)) %>% print
+str(act3)
+```
+
+The mean is  **`r format(act3$mean,digits = 8)`** and median is **`r format(act3$median,digits = 8)`**.
+
+
+## What is the average daily activity pattern?
+
+        1. Make a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all days (y-axis)
+        
+```{r act4}
+act4 <- activity  %>% na.omit() %>%
+        group_by(interval) %>%   
+        summarise(stepsperInterval = mean(steps, na.rm = TRUE)) %>% print
+
+ggplot(act4, aes(x=interval, y=stepsperInterval)) +   
+        geom_line(color="orange", size=1) +  
+        labs(title="Average Daily Activity Pattern", x="Interval", y="Number of steps") +  
+        theme_bw()
+```
+
+        2. Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps?
+```{r act5}
+act5 <- act4 %>%  filter(stepsperInterval == max(stepsperInterval)) %>% print
+```
+
+The **`r act5$interval`<sup>th</sup>** interval has maximum **`r round(act5$stepsperInterval)`** steps.
+
+
+## Imputing missing values
+
+Note that there are a number of days/intervals where there are missing values (coded as NA). The presence of missing days may introduce bias into some calculations or summaries of the data.
+
+        1. Calculate and report the total number of missing values in the dataset (i.e. the total number of rows with NAs)
+
+```{r act6}
+colSums(is.na(activity))
+```       
+We are missing **`r colSums(is.na(activity))[1]`** values from steps column
+
+        2. Devise a strategy for filling in all of the missing values in the dataset. The strategy does not need to be sophisticated. For example, you could use the mean/median for that day, or the mean for that 5-minute interval, etc.
+
+To populate missing values, we choose to replace them with the mean value at the same interval across days.
+
+        3. Create a new dataset that is equal to the original dataset but with the missing data filled in.
+```{r act7} 
+act7 <- activity  %>%
+        group_by(interval) %>% 
+        mutate(steps= replace(steps, is.na(steps), mean(steps, na.rm=TRUE)))
+```
+
+        4. Make a histogram of the total number of steps taken each day and Calculate and report the mean and median total number of steps taken per day. Do these values differ from the estimates from the first part of the assignment? What is the impact of imputing missing data on the estimates of the total daily number of steps?
+
+```{r act8}
+act8 <- act7  %>%
+        group_by(date) %>%   
+        summarise(stepsperDay = sum(steps, na.rm = TRUE),
+                  mean = mean(stepsperDay, na.rm = TRUE),
+                  median = median(stepsperDay, na.rm = TRUE)) %>% print
+str(act8)                   
+
+hist(act8$stepsperDay, breaks=8, col="red", main ="Total steps per day", xlab="Steps per Day")   
+```
+
+The mean is **`r format(act3$mean,digits = 8)`** and median is **`r format(act3$median,digits = 8)`**    .
+
+These values do not differ from the estimates from the first part of the assignment.
+
+- **Before filling the data**
+    1. Mean  : **`r format(act3$mean,digits = 8)`**
+    2. Median: **`r format(act3$median,digits = 8)`**    
+          
+- **After filling the data**
+    1. Mean  : **`r format(act3$mean,digits = 8)`**
+    2. Median: **`r format(act3$median,digits = 8)`**    
+
+We see that the values after filling the data mean and median are equal.
+
+
+## Are there differences in activity patterns between weekdays and weekends?
+
+For this part the weekdays() function may be of some help here. Use the dataset with the filled-in missing values for this part.
+        1. Create a new factor variable in the dataset with two levels – “weekday” and “weekend” indicating whether a given date is a weekday or weekend day.
+
+```{r act9}
+act9 <- act7 %>% 
+                mutate(wd = as.factor(ifelse(wday(date) %in% c(0,7), "weekend", "weekday")) )
+                
+head(act9)
+```
+        
+	2. Make a panel plot containing a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis). See the README file in the GitHub repository to see an example of what this plot should look like using simulated data.
+
+```{r act10}
+act10 <- act9 %>%
+        group_by(wd, interval) %>%   
+        summarise(stepsperInterval = mean(steps, na.rm = TRUE)) 
+        
+ggplot(act10, aes(x=interval, y=stepsperInterval)) + 
+        geom_line(color="blue") + 
+        facet_wrap(~ wd, nrow=2, ncol=1) +
+        labs(x="Interval", y="Number of steps") +
+        theme_bw()
+```
+
+We can see at the graph above that activity on the weekday has the greatest peak from all steps intervals. But, we can see too that weekends activities has more peaks over a hundred than weekday. This could be due to the fact that activities on weekdays mostly follow a work related routine, where we find some more intensity activity in little a free time that the employ can made some sport. In the other hand, at weekend we can see better distribution of effort along the time.
