@@ -1,38 +1,52 @@
 ---
-title: "Storm Data"
-author: "Marios"
-date: "Friday, February 13, 2015"
+title: "NOAA's Storm Events Database:\n A Swiss knife in preparing for severe weather events"
 output: 
   html_document:
     keep_md: true
 ---
 
+[Rpubs link] (http://rpubs.com/mkoniari/59800)
 
-First, we set echo equal a **TRUE** and results equal a **'hold'** as global options for this document.  
-```{r set_options}
-library(knitr)
-opts_chunk$set(echo = TRUE, results = 'hold')
-```
+## Synopsis
+
+In this report, we aim to analyze the impact of different weather events on public health and economy based on the storm database collected from the U.S. National Oceanic and Atmospheric Administration's (NOAA) from 1950 - 2011. We use the number of fatalities, injuries, property and crop damage to decide which types of event are most harmful to the population health and economy. From these data, we found that excessive heat and tornado are most harmful with respect to population health, while flood, drought, and hurricane/typhoon have the greatest economic consequences.
+
+## Loading and preprocessing the raw data
+
+Data for this assignment can be downloaded from:
+
+* [Storm Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) [47Mb]
+There is also some documentation of the database available. Here you will find how some of the variables are constructed/defined.
+
+* National Weather Service [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)
+
+* National Climatic Data Center Storm Events [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf)
+
+### Reading the raw data
+
+There are 902297 rows and 37 columns in total. The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete
 
 
-```{r  message=FALSE, warning=FALSE}
-# load r libraries
+```{r preload, message=FALSE, warning=FALSE}
+remove(list=ls())
 sessionInfo()
-packages <- c("dplyr", "tidyr",  "ggplot2", "lubridate")
+# load r libraries
+packages <- c("knitr", "dplyr", "tidyr",  "ggplot2", "gridExtra", "R.utils", "downloader", "lubridate")
 if (length(setdiff(packages, rownames(installed.packages()))) > 0) {
   install.packages(setdiff(packages, rownames(installed.packages())))  
 }
 sapply(packages, require, character.only=TRUE, quietly=TRUE)
 
+
 downloadFile <-function(furl, fsave){
-        download.file(fileUrl,  fsave, method="curl")
+        download(furl, fsave = "wb")
+        #download.file(fileUrl,  fsave, method="curl")
         cat(paste0("file download complete - remember to unzip file: ",fsave))        
 }   
 
-
-DEBUG <- TRUE
+#DEBUG <- TRUE
 fileUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
-DATAFILE <- file.path(getwd(), "stormData.csv")
+DATAFILE <- file.path(getwd(), "stormData.cvs")
 DATAZIP  <- file.path(getwd(), "stormData.bz2")
 
 # check and download data file
@@ -43,162 +57,237 @@ if (!file.exists(DATAFILE)) {
                 cat(paste0(DATAZIP," doesn't exist trying to download ... "))
                 downloadFile(fileUrl, DATAZIP)
                 }
-  unzip ("stormData.bz2")
+  # Extract file from bz2
+  bunzip2(DATAZIP, DATAFILE, remove = FALSE)  
   stopifnot(file.exists(DATAFILE))          
 }   
 ```
 
-
-## Loading and preprocessing the data
-
-
-## Loading and preprocessing the data
-
-Show any code that is needed to
-
-* Load the data (i.e. read.csv())
-
-* Process/transform the data (if necessary) into a format suitable for your analysis
-
-```{r read_data}
-activity <- tbl_df(read.csv(DATAFILE)) %>%
-            mutate( date = ymd(date), mydate = date +  minutes(interval)) %>%
-            select(steps, date, interval, mydate )
+```{r read_data, cache=TRUE}
+assign( "rawData", read.csv(DATAFILE), envir = .GlobalEnv)
 ```
 
-Now, let us check the data using `str()` method:
+### Standardizing EVTYPEs
+
+Data is rather messy. There are 985 factors of EVTYPE. So we need to clean the EVTYPE label.  We'll collapse the many variations of the most common event types into a single EVTYPE.  In general we do  `head(sort(table(rawData$EVTYPE), decreasing=TRUE), 30)`
+and observe high frequency counts that could be combined, e.g. 
+`table(grep(“THUNDERSTORM WIND”, rawData$EVTYPE, value=TRUE))`
+We use the EVTYPE with highest frequency as the “standard” name.
+
+```{r EVTYPE_fix}
+head(table(rawData$EVTYPE), n =20)
+
+# Force all EVTYPEs to uppercase to avoid case variations
+rawData$EVTYPE <- toupper(rawData$EVTYPE)
+
+# Standardize spacing: replace multiple spaces with single space
+rawData$EVTYPE <- gsub(" +", " ", rawData$EVTYPE)
+
+rawData$EVTYPE[grep("HURRICANE|TYPHOON|TROPICAL", rawData$EVTYPE)] <- "HURRICANE/TYPHOON/TROPICAL STORM"
+
+rawData$EVTYPE[grep("SNOW|ICE|BLIZZARD|WINTER STORM|FREEZING|WINTRY MIX|SLEET", rawData$EVTYPE)] <- "WINTER STORM"
+
+rawData$EVTYPE[grep("WINTER WEATHER|COLD|ICY|GLAZE|LOW TEMPERATURE|HYPOTHERMIA|HYPERTHERMIA|COLD TEMPERATURE|WINDCHILL", 
+    rawData$EVTYPE)] <- "WINTER WEATHER"
+
+# ~15 variations of 'High Wind' and 3 variations of 'strong wind' but after
+# 'Snow' variations removed above
+rawData$EVTYPE[grep("HIGH WIND|STRONG WIND|Gusty Winds|GUSTY WIND", rawData$EVTYPE)] <- "HIGH WIND"
+
+# Change these 'false hits' for 'thunderstorm wind' to wind
+rawData$EVTYPE <- sub("NON-THUNDERSTORM WIND|NON THUNDERSTORM WIND", "WIND", rawData$EVTYPE)
+
+# Other non thunderstorm winds
+
+# Standardize variations/spelling errors in 'Thunderstorm'
+rawData$EVTYPE <- gsub("THUNDEERSTORM|THUNDERESTORM|THUNDERSTROM|THUDERSTORM|THUNERSTORM|THUNDERTORM|TUNDERSTORM", 
+    "THUNDERSTORM", rawData$EVTYPE)
+
+rawData$EVTYPE <- sub("TSTM WIND|STORM FORCE WINDS", "THUNDERSTORM WIND", rawData$EVTYPE)
+# Manually reviewed ~44 variations that are combined here
+rawData$EVTYPE[grep("THUNDERSTORMW|THUNDERSTORMWINDS|THUNDERSTORM WINS|TSTMW", rawData$EVTYPE)] <- "THUNDERSTORM WIND"
+rawData$EVTYPE[grep("THUNDERSTORM WIND|THUNDERSTORMS WIND", rawData$EVTYPE)] <- "THUNDERSTORM WIND"
+
+# Combine ~59 variations of FLOODING
+rawData$EVTYPE[grep("FLOOD|FLD|RECORD RAINFALL", rawData$EVTYPE)] <- "FLOODING"
+
+# Combine ~20 variations of HAIL
+rawData$EVTYPE[grep("HAIL", rawData$EVTYPE)] <- "HAIL"
+
+# Combine variations of LIGHTNING
+rawData$EVTYPE[grep("LIGHTNING|LIGHTING|LIGNTNING", rawData$EVTYPE)] <- "LIGHTNING"
+
+# Combine variations of fire
+rawData$EVTYPE[grep("HEAVY SURF|HIGH SURF", rawData$EVTYPE)] <- "HEAVY/HIGH SURF"
+
+# Combine variations of fire
+rawData$EVTYPE[grep("FIRE", rawData$EVTYPE)] <- "WILDFIRE"
+
+# Combine variations of freeze -- likely agriculture related
+rawData$EVTYPE[grep("FROST|FREEZE", rawData$EVTYPE)] <- "FROST/FREEZE"
+
+rawData$EVTYPE[grep("SLIDE", rawData$EVTYPE)] <- "LAND/MUD/ROCK SLIDES"
+
+rawData$EVTYPE[grep("RIP", rawData$EVTYPE)] <- "RIP CURRENT"
+
+# HEAT or EXCESSIVE HEAT
+rawData$EVTYPE[grep("HEAT", rawData$EVTYPE)] <- "HEAT"
+
+rawData$EVTYPE[grep("DENSE FOG", rawData$EVTYPE)] <- "FOG"
+
+# Only notable winds are high wind
+rawData$EVTYPE[rawData$EVTYPE == "WINDS" | rawData$EVTYPE == "WIND"] <- "HIGH WIND"
+
+
+# Collapse all events with frequency < 50 to category “mis”:
+
+event.types <- sort(table(rawData$EVTYPE), decreasing = TRUE)
+event.types.under.50 <- names(event.types[event.types < 50])
+
+rawData$EVTYPE[rawData$EVTYPE %in% event.types.under.50] <- "MISC"
+```
+
+Thus the list of EVTYPEs for the analysis:
+```{r EVTYPE_list}
+sort(table(rawData$EVTYPE), decreasing = TRUE)
+
+```
+
+We keep only the records that show fatalities, injuries, property or crop damage.
 
 ```{r check_data}
-str(activity)
+stormData <- tbl_df(rawData) %>%
+        filter(FATALITIES >0 | INJURIES >0 | PROPDMG >0| CROPDMG >0) %>%
+        mutate (BGN_DATE  = mdy_hms(BGN_DATE), year = year(BGN_DATE))
+
+
+colSums(is.na(stormData))
+summary(stormData)
+```
+There are 902297 rows and 37 columns in total. From them we kept only 254633 interesting observations. 
+
+#### A note on the temporal aspect of measures 
+
+```{r temp}
+temporal <- stormData %>% 
+        mutate(year= year(BGN_DATE)) %>%
+        filter(year<1990) %>%
+        group_by(year) %>%                              
+        summarise(Events  = n(),
+                Unique_Elements = n_distinct(EVTYPE)) 
+```
+We have to note that data defore year 1990 has only **`r max(temporal$Unique_Elements)` types ** of observations. This finding raises questions as to whether we should ignore early years data (before 1990) or not. We choose to include the data in our study.
+
+
+### Fix property and crop damage data to be useful in analysis
+We will convert the **property damage** and **crop damage** data into comparable numerical forms according to the meaning of units described in the code book ([Storm Events](http://ire.org/nicar/database-library/databases/storm-events/)). Both `PROPDMGEXP` and `CROPDMGEXP` columns record a multiplier for each observation where we have Hundred (H), Thousand (K), Million (M) and Billion (B).
+
+
+```{r damageFix}
+multiplierAbr <- c("H", "K", "M", "B")
+multiplier <- c(100, 1000, 1e+06, 1e+09)
+names(multiplier) <- multiplierAbr
+# multiplier['H'] == 100
+
+stormData <- stormData %>% 
+        mutate(PROPDMGEXP = toupper(PROPDMGEXP), CROPDMGEXP = toupper(CROPDMGEXP)) %>%
+        mutate(propCash = ifelse(PROPDMGEXP %in% multiplierAbr, multiplier[PROPDMGEXP]*PROPDMG,0.0)) %>%
+        mutate(cropCash = ifelse(CROPDMGEXP %in% multiplierAbr, multiplier[CROPDMGEXP]*CROPDMG,0.0))
 ```
 
+## Results
 
-## What is mean total number of steps taken per day?
+        1. Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?          
+We check the number of fatalities and injuries that are caused by the severe weather events. We would like to get the most severe types of weather events.        
 
-For this part of the assignment, you can ignore the missing values in the dataset.
+```{r fatalStorm}
+healthStorm <- stormData %>% 
+                group_by(EVTYPE) %>%                              
+                summarise(
+                        Events  = n(), 
+                        Fatalities = sum(FATALITIES), 
+                        Injuries = sum(INJURIES)) %>%
+                arrange(desc(Fatalities), desc(Injuries)) %>%
+                print
 
-    1. Calculate the total number of steps taken per day
-   
-```{r act1}
-act1 <- activity  %>% na.omit() %>%
-        group_by(date) %>%   
-        summarise(stepsperDay = sum(steps, na.rm = TRUE)) %>% print
-summary(act1)                   
+
+
+top5fatalEvents <- healthStorm  %>% 
+                        arrange(desc(Fatalities)) %>% 
+                        select ( EVTYPE,Fatalities) %>% 
+                        mutate(EVTYPE = reorder(EVTYPE, Fatalities, max)) %>%
+                        slice(1:5)
+
+top5injEvents <- healthStorm  %>% 
+                        arrange(desc(Injuries)) %>% 
+                        select (EVTYPE,Injuries) %>% 
+                        mutate(EVTYPE = reorder(EVTYPE, Injuries, max)) %>%
+                        slice(1:5)
 ```
 
-    2. Make a histogram of the total number of steps taken each day
+The most harmful with respect to Fatalities in population health are:**`r top5fatalEvents$EVTYPE` **.
 
-```{r act2}
-hist(act1$stepsperDay, breaks=8, col="red", main ="Total steps per day", xlab="Steps per Day")   
+The most harmful with respect to Injuries in population health are: **`r top5injEvents$EVTYPE` **.
+
+We plot total fatalities and total injuries. 
+
+```{r fatalPlot}
+# plot fatalities
+fplot <- ggplot(data=top5fatalEvents, aes(EVTYPE, Fatalities)) + 
+    geom_bar(colour="black",  width=.7, stat="identity") + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    xlab("Severe Weather Type") + ylab("Fatalities") +
+    ggtitle("Fatalities by Severe Weather\n Events in the U.S.")
+# plot Injuries
+iplot <- ggplot(data=top5injEvents, aes(EVTYPE, Injuries)) + 
+    geom_bar(colour="black",  width=.7, stat="identity") + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    xlab("Severe Weather Type") + ylab("Injuries") +
+    ggtitle("Injuries by Severe Weather\n Events in the U.S.")
+grid.arrange(fplot, iplot, ncol = 2)
+```
+        2. Across the United States, which types of events have the greatest economic consequences?
+```{r economyPlot}
+ecoStrom <- stormData %>% 
+                group_by(EVTYPE) %>%                              
+                summarise(
+                        Events  = n(), 
+                        propertyDamage = sum(propCash) / 10^9, 
+                        cropDamage = sum(cropCash)/10^9) %>%
+                arrange(desc(propertyDamage), desc(cropDamage)) %>%
+                print
+
+top5PropEvents <- ecoStrom  %>% 
+                        arrange(desc(propertyDamage)) %>% 
+                        select ( EVTYPE,propertyDamage) %>% 
+                        mutate(EVTYPE = reorder(EVTYPE, propertyDamage, max)) %>%
+                        slice(1:5)
+
+top5CropEvents <- ecoStrom  %>% 
+                        arrange(desc(cropDamage)) %>% 
+                        select (EVTYPE,cropDamage) %>% 
+                        mutate(EVTYPE = reorder(EVTYPE, cropDamage, max)) %>%
+                        slice(1:5)
 ```
 
-    3.  Calculate and report the mean and median of the total number of steps taken per day
-```{r act3}
-act3 <- act1  %>% summarise( mean = mean(stepsperDay, na.rm = TRUE),
-                             median = median(stepsperDay, na.rm = TRUE)) %>% print
-str(act3)
+The events that have the greatest economic consequences are: **`r top5PropEvents$EVTYPE` **. 
+
+The most harmful events with respect to crop production are: **`r top5CropEvents$EVTYPE` **.
+
+We then plot total property damage and total crop damage. 
+
+```{r ecoPlot}
+# plot propertyDamage
+pplot <- ggplot(data=top5PropEvents, aes(EVTYPE, propertyDamage)) + 
+    geom_bar(colour="black",  width=.7, stat="identity") + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    xlab("Severe Weather Type") + ylab("Property Damage") +
+    ggtitle("Property Damage by Severe Weather\n Events in the U.S. (Billion $)")
+# plot cropDamage
+cplot <- ggplot(data=top5CropEvents, aes(EVTYPE, cropDamage)) + 
+    geom_bar(colour="black",  width=.7, stat="identity") + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    xlab("Severe Weather Type") + ylab("Crop damage") +
+    ggtitle("Crop damage by Severe Weather\n Events in the U.S. (Billion $)")
+grid.arrange(pplot, cplot, ncol = 2)
 ```
-
-The mean is  **`r format(act3$mean,digits = 8)`** and median is **`r format(act3$median,digits = 8)`**.
-
-
-## What is the average daily activity pattern?
-
-        1. Make a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all days (y-axis)
-        
-```{r act4}
-act4 <- activity  %>% na.omit() %>%
-        group_by(interval) %>%   
-        summarise(stepsperInterval = mean(steps, na.rm = TRUE)) %>% print
-
-ggplot(act4, aes(x=interval, y=stepsperInterval)) +   
-        geom_line(color="orange", size=1) +  
-        labs(title="Average Daily Activity Pattern", x="Interval", y="Number of steps") +  
-        theme_bw()
-```
-
-        2. Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps?
-```{r act5}
-act5 <- act4 %>%  filter(stepsperInterval == max(stepsperInterval)) %>% print
-```
-
-The **`r act5$interval`<sup>th</sup>** interval has maximum **`r round(act5$stepsperInterval)`** steps.
-
-
-## Imputing missing values
-
-Note that there are a number of days/intervals where there are missing values (coded as NA). The presence of missing days may introduce bias into some calculations or summaries of the data.
-
-        1. Calculate and report the total number of missing values in the dataset (i.e. the total number of rows with NAs)
-
-```{r act6}
-colSums(is.na(activity))
-```       
-We are missing **`r colSums(is.na(activity))[1]`** values from steps column
-
-        2. Devise a strategy for filling in all of the missing values in the dataset. The strategy does not need to be sophisticated. For example, you could use the mean/median for that day, or the mean for that 5-minute interval, etc.
-
-To populate missing values, we choose to replace them with the mean value at the same interval across days.
-
-        3. Create a new dataset that is equal to the original dataset but with the missing data filled in.
-```{r act7} 
-act7 <- activity  %>%
-        group_by(interval) %>% 
-        mutate(steps= replace(steps, is.na(steps), mean(steps, na.rm=TRUE)))
-```
-
-        4. Make a histogram of the total number of steps taken each day and Calculate and report the mean and median total number of steps taken per day. Do these values differ from the estimates from the first part of the assignment? What is the impact of imputing missing data on the estimates of the total daily number of steps?
-
-```{r act8}
-act8 <- act7  %>%
-        group_by(date) %>%   
-        summarise(stepsperDay = sum(steps, na.rm = TRUE),
-                  mean = mean(stepsperDay, na.rm = TRUE),
-                  median = median(stepsperDay, na.rm = TRUE)) %>% print
-str(act8)                   
-
-hist(act8$stepsperDay, breaks=8, col="red", main ="Total steps per day", xlab="Steps per Day")   
-```
-
-The mean is **`r format(act3$mean,digits = 8)`** and median is **`r format(act3$median,digits = 8)`**    .
-
-These values do not differ from the estimates from the first part of the assignment.
-
-- **Before filling the data**
-    1. Mean  : **`r format(act3$mean,digits = 8)`**
-    2. Median: **`r format(act3$median,digits = 8)`**    
-          
-- **After filling the data**
-    1. Mean  : **`r format(act3$mean,digits = 8)`**
-    2. Median: **`r format(act3$median,digits = 8)`**    
-
-We see that the values after filling the data mean and median are equal.
-
-
-## Are there differences in activity patterns between weekdays and weekends?
-
-For this part the weekdays() function may be of some help here. Use the dataset with the filled-in missing values for this part.
-        1. Create a new factor variable in the dataset with two levels – “weekday” and “weekend” indicating whether a given date is a weekday or weekend day.
-
-```{r act9}
-act9 <- act7 %>% 
-                mutate(wd = as.factor(ifelse(wday(date) %in% c(0,7), "weekend", "weekday")) )
-                
-head(act9)
-```
-        
-	2. Make a panel plot containing a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis). See the README file in the GitHub repository to see an example of what this plot should look like using simulated data.
-
-```{r act10}
-act10 <- act9 %>%
-        group_by(wd, interval) %>%   
-        summarise(stepsperInterval = mean(steps, na.rm = TRUE)) 
-        
-ggplot(act10, aes(x=interval, y=stepsperInterval)) + 
-        geom_line(color="blue") + 
-        facet_wrap(~ wd, nrow=2, ncol=1) +
-        labs(x="Interval", y="Number of steps") +
-        theme_bw()
-```
-
-We can see at the graph above that activity on the weekday has the greatest peak from all steps intervals. But, we can see too that weekends activities has more peaks over a hundred than weekday. This could be due to the fact that activities on weekdays mostly follow a work related routine, where we find some more intensity activity in little a free time that the employ can made some sport. In the other hand, at weekend we can see better distribution of effort along the time.
