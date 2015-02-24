@@ -1,4 +1,4 @@
-Link on <a href="http://rpubs.com/mkoniari/coursera_repData_2" target="_blank">RPubs</a>  
+Link on <a href="http://rpubs.com/mkoniari/59800" target="_blank">RPubs</a>  
 
 
 ### Introduction
